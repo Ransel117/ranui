@@ -78,18 +78,20 @@ RUI_INLINE int32_t rui_quit(int32_t);
 
 #if RUI_PLATFORM == RUI_PLATFORM_LINUX
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
 #include <signal.h>
 
 typedef struct rui_x11 rui_x11;
 struct rui_x11 {
 	Display* display;
+    Atom     delete_message_atom;
 	uint32_t window_width;
 	uint32_t window_height;
 };
 
 rui_x11 dm;
 
-RUI_INLINE int32_t x11_handler(Display *display, XErrorEvent *e) {
+RUI_INLINE int32_t x11_handler(Display* display, XErrorEvent* e) {
 	char buf[2048];
 	XGetErrorText(display, e->error_code, buf, sizeof(buf));
 	printf("%s\n", buf);
@@ -97,22 +99,34 @@ RUI_INLINE int32_t x11_handler(Display *display, XErrorEvent *e) {
 }
 RUI_INLINE void rui_init(void) {
 	dm.display = XOpenDisplay(NULL);
+    dm.delete_message_atom = XInternAtom(dm.display, "WM_DELETE_WINDOW", false);
 	XSetErrorHandler(x11_handler);
 }
 RUI_INLINE void rui_screen_dims(int32_t* width_out, int32_t* height_out) {
-	Screen* screen = XDefaultScreenOfDisplay(dm.display);
-	*width_out = screen->width;
-	*height_out = screen->height;
+	Screen* s;
+    s = XDefaultScreenOfDisplay(dm.display);
+	*width_out = s->width;
+	*height_out = s->height;
 }
 RUI_INLINE rui_window* rui_window_open(char* title, int32_t width, int32_t height) {
-	rui_window *window;
+    int32_t s, swidth, sheight;
+    Window w;
+    Display* d;
+	rui_window* window;
 
     window = (rui_window*)malloc(sizeof(rui_window));
 
-	Display* d = dm.display;
-	int32_t s = DefaultScreen(d);
+	d = dm.display;
+	s = DefaultScreen(d);
 
-	Window w = XCreateSimpleWindow(d, RootWindow(d, s), width >> 1, height >> 1, width, height, 1, BlackPixel(d, s), WhitePixel(d, s));
+    rui_screen_dims(&swidth, &sheight);
+
+	w = XCreateSimpleWindow(
+                            d, RootWindow(d, s),
+                            width >> 1, height >> 1,
+                            swidth >> 1, sheight >> 1,
+                            1, BlackPixel(d, s), WhitePixel(d, s)
+                            );
 
     XSetClassHint(d, w, &(XClassHint){title, RUI_CLASS_NAME});
     XStoreName(d, w, title);
@@ -120,7 +134,9 @@ RUI_INLINE rui_window* rui_window_open(char* title, int32_t width, int32_t heigh
 
     window->instance = d;
 	window->handle = (void*)(uintptr_t)w;
-	XSelectInput(d, w, ExposureMask | KeyPressMask | StructureNotifyMask);
+
+    XSelectInput(d, w, ExposureMask | KeyPressMask | StructureNotifyMask);
+    XSetWMProtocols(dm.display, w, &dm.delete_message_atom, 1);
 	XMapWindow(d, w);
     XFlush(d);
 
@@ -128,22 +144,42 @@ RUI_INLINE rui_window* rui_window_open(char* title, int32_t width, int32_t heigh
 }
 RUI_INLINE bool rui_process_events(rui_event* e) {
     XEvent xe;
+    KeySym key_sym;
+    XConfigureEvent xce;
     while (XPending(dm.display)) {
         XNextEvent(dm.display, &xe);
-        if (xe.type == KeyPress) {
+        switch(xe.type) {
+        case KeyPress: {
             e->type = RUI_EVENT_TYPE_KEY_PRESSED;
-            KeySym key_sym = XLookupKeysym(&xe.xkey, 0);
+            key_sym = XLookupKeysym(&xe.xkey, 0);
             if (key_sym < 128) {
                 e->key = (char)key_sym;
                 return true;
             }
-        } else if (xe.type == KeyRelease) {
+        }
+        case KeyRelease: {
             e->type = RUI_EVENT_TYPE_KEY_RELEASED;
-            KeySym key_sym = XLookupKeysym(&xe.xkey, 0);
+            key_sym = XLookupKeysym(&xe.xkey, 0);
             if (key_sym < 128) {
                 e->key = (char)key_sym;
                 return true;
             }
+        }
+        case ClientMessage: {
+            if (xe.xclient.data.l[0] == dm.delete_message_atom) {
+                e->type = RUI_EVENT_TYPE_WINDOW_CLOSED;
+                return true;
+            }
+        }
+        case ConfigureNotify: {
+            xce = xe.xconfigure;
+            if ((xce.width != dm.window_width) || (xce.height != dm.window_height)) {
+                e->type = RUI_EVENT_TYPE_WINDOW_RESIZED;
+                e->window_width = xce.width;
+                e->window_height = xce.height;
+                return true;
+            }
+        }
         }
     }
     return false;
@@ -182,32 +218,34 @@ RUI_INLINE LRESULT CALLBACK WndProc(HWND hwnd, UINT Msg, WPARAM wParam, LPARAM l
     // When called via DispatchMessage after TranslateMessage
     if ((e = dm.event)) {
         switch (Msg) {
-        case WM_SIZE:
+        case WM_SIZE: {
             e->type = RUI_EVENT_TYPE_WINDOW_RESIZED;
             e->window_width = LOWORD(lParam);
             e->window_height = HIWORD(lParam);
             dm.event = NULL;
             return 0;
-
-        case WM_CHAR:
+        }
+        case WM_CHAR: {
             e->type = RUI_EVENT_TYPE_KEY_PRESSED;
             e->key = wParam;
             dm.event = NULL;
             return 0;
-
-        case WM_CLOSE:
+        }
+        case WM_CLOSE: {
             e->type = RUI_EVENT_TYPE_WINDOW_CLOSED;
             dm.event = NULL;
             return 0;
-
-        default:
+        }
+        default: {
             return DefWindowProcA(hwnd, Msg, wParam, lParam);
         }
-    // when called via PeekMessage or CreateWindowEx
+        }
+        // when called via PeekMessage or CreateWindowEx
     } else {
         switch (Msg) {
-        default:
+        default: {
             return DefWindowProcA(hwnd, Msg, wParam, lParam);
+        }
         }
     }
 }
@@ -216,6 +254,7 @@ RUI_INLINE rui_window* rui_window_open(char* title, int32_t width, int32_t heigh
     HINSTANCE hinstance;
     WNDCLASSEXA wc;
     HWND hwnd;
+    rui_window *window;
 
     hinstance = GetModuleHandle(NULL);
 
@@ -224,16 +263,17 @@ RUI_INLINE rui_window* rui_window_open(char* title, int32_t width, int32_t heigh
     wc.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hinstance;
-    wc.hCursor = LoadCursorA(NULL, IDC_ARROW); // load cursor otherwise it defaults to busy cursor icon
+    // load cursor otherwise it defaults to busy cursor icon
+    wc.hCursor = LoadCursorA(NULL, IDC_ARROW);
     wc.lpszClassName = RUI_CLASS_NAME;
 
     RegisterClassExA(&wc);
 
     hwnd = CreateWindowExA(
-        0, RUI_CLASS_NAME, title, WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-        NULL, NULL, hinstance, NULL
-    );
+                           0, RUI_CLASS_NAME, title, WS_OVERLAPPEDWINDOW,
+                           CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                           NULL, NULL, hinstance, NULL
+                           );
 
     rui_screen_dims(&swidth, &sheight);
 
@@ -244,11 +284,11 @@ RUI_INLINE rui_window* rui_window_open(char* title, int32_t width, int32_t heigh
     dm.hinstance = hinstance;
     dm.hwnd = hwnd;
 
-    rui_window *window;
 
     window = (rui_window*)malloc(sizeof(rui_window));
     window->instance = dm.hinstance;
     window->handle = (void*)(uintptr_t)dm.hwnd;
+
     return window;
 }
 RUI_INLINE bool rui_process_events(rui_event* e) {
