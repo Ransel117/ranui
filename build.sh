@@ -5,7 +5,7 @@ CFLAGS="-Wall -Wpedantic -ggdb -std=c11"
 CDEFINES=""
 CINCLUDES=""
 CFILES="main.c"
-CLIBS="-lX11"
+CLIBS="-lxcb"
 
 EXEC="main"
 

@@ -22,47 +22,124 @@
 #error "Platform not supported"
 #endif /* Check platform */
 
-/* GCC-compatible compiler (gcc, clang) */
-#if defined(__GNUC__) || defined(__clang__) || defined(__PCC__)
-#define RUI_INLINE static inline __attribute__((always_inline))
-/* Microsoft cl */
-#elif defined(_MSC_VER)
-#define RUI_INLINE static inline __forceinline
-/* Unknown */
-#else
 #define RUI_INLINE static inline
-#endif /* Check compiler */
 
 #define RUI_CLASS_NAME "ranui_program"
 #define RUI_UNUSED(x) ((void)(x))
 
+#if RUI_PLATFORM == RUI_PLATFORM_LINUX
+// TODO: maybe do something regarding åöä and their other specifics
+// xcb keycodes seem to be locale independent and is position based i think
+// might need to test with different keyboards
+#define RUIK_0 19
+#define RUIK_1 10
+#define RUIK_2 11
+#define RUIK_3 12
+#define RUIK_4 13
+#define RUIK_5 14
+#define RUIK_6 15
+#define RUIK_7 16
+#define RUIK_8 17
+#define RUIK_9 18
+#define RUIK_Q 24
+#define RUIK_W 25
+#define RUIK_E 26
+#define RUIK_R 27
+#define RUIK_T 28
+#define RUIK_Y 29
+#define RUIK_U 30
+#define RUIK_I 31
+#define RUIK_O 32
+#define RUIK_P 33
+#define RUIK_A 38
+#define RUIK_S 39
+#define RUIK_D 40
+#define RUIK_F 41
+#define RUIK_G 42
+#define RUIK_H 43
+#define RUIK_J 44
+#define RUIK_K 45
+#define RUIK_L 46
+#define RUIK_Z 52
+#define RUIK_X 53
+#define RUIK_C 54
+#define RUIK_V 55
+#define RUIK_B 56
+#define RUIK_N 57
+#define RUIK_M 58
+#define RUIK_COMMA 59
+#define RUIK_DOT 60
+#elif RUI_PLATFORM == RUI_PLATFORM_WINDOWS
+// TODO: maybe do something better other than pure ASCII for windows
+#define RUIK_0 '0'
+#define RUIK_1 '1'
+#define RUIK_2 '2'
+#define RUIK_3 '3'
+#define RUIK_4 '4'
+#define RUIK_5 '5'
+#define RUIK_6 '6'
+#define RUIK_7 '7'
+#define RUIK_8 '8'
+#define RUIK_9 '9'
+#define RUIK_Q 'q'
+#define RUIK_W 'w'
+#define RUIK_E 'e'
+#define RUIK_R 'r'
+#define RUIK_T 't'
+#define RUIK_Y 'y'
+#define RUIK_U 'u'
+#define RUIK_I 'i'
+#define RUIK_O 'o'
+#define RUIK_P 'p'
+#define RUIK_A 'a'
+#define RUIK_S 's'
+#define RUIK_D 'd'
+#define RUIK_F 'f'
+#define RUIK_G 'g'
+#define RUIK_H 'h'
+#define RUIK_J 'j'
+#define RUIK_K 'k'
+#define RUIK_L 'l'
+#define RUIK_Z 'z'
+#define RUIK_X 'x'
+#define RUIK_C 'c'
+#define RUIK_V 'v'
+#define RUIK_B 'b'
+#define RUIK_N 'n'
+#define RUIK_M 'm'
+#define RUIK_COMMA ','
+#define RUIK_DOT '.'
+#else
+#error "not supported"
+#endif
+
 typedef int32_t rui_event_type;
 enum rui_event_type {
-	RUI_EVENT_TYPE_UNKNOWN,
-	RUI_EVENT_TYPE_KEY_PRESSED,
-	RUI_EVENT_TYPE_KEY_RELEASED,
-	RUI_EVENT_TYPE_WINDOW_RESIZED,
-	RUI_EVENT_TYPE_WINDOW_CLOSED,
+    RUI_EVENT_TYPE_UNKNOWN,
+    RUI_EVENT_TYPE_KEY_PRESSED,
+    RUI_EVENT_TYPE_KEY_RELEASED,
+    RUI_EVENT_TYPE_WINDOW_RESIZED,
+    RUI_EVENT_TYPE_WINDOW_CLOSED,
 };
 
 typedef struct rui_event rui_event;
 struct rui_event {
-	rui_event_type type;
-	union {
-		char key;
-		struct {
-			uint32_t window_width;
-			uint32_t window_height;
-		};
-	};
-	void* handle;
+    rui_event_type type;
+    union {
+        uint8_t key;
+        struct {
+            uint32_t window_width;
+            uint32_t window_height;
+        };
+    };
+    void* handle;
 };
 
 
 typedef struct rui_window rui_window;
 struct rui_window {
-	void* instance;
-	void* handle;
+    void* instance;
+    void* handle;
 };
 
 RUI_INLINE void rui_init(void);
@@ -77,116 +154,118 @@ RUI_INLINE int32_t rui_quit(int32_t);
 #include <malloc.h>
 
 #if RUI_PLATFORM == RUI_PLATFORM_LINUX
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
+#include <xcb/xcb.h>
 #include <signal.h>
+#include <string.h>
 
 typedef struct rui_x11 rui_x11;
 struct rui_x11 {
-	Display* display;
-    Atom     delete_message_atom;
-	uint32_t window_width;
-	uint32_t window_height;
+    xcb_connection_t* connection;
+    xcb_screen_t*     screen;
+    xcb_atom_t        wm_delete_window_atom;
+    xcb_atom_t        wm_protocols_atom;
+    uint32_t window_width;
+    uint32_t window_height;
 };
 
 rui_x11 dm;
 
-RUI_INLINE int32_t x11_handler(Display* display, XErrorEvent* e) {
-	char buf[2048];
-	XGetErrorText(display, e->error_code, buf, sizeof(buf));
-	printf("%s\n", buf);
-	return 0;
-}
 RUI_INLINE void rui_init(void) {
-	dm.display = XOpenDisplay(NULL);
-    dm.delete_message_atom = XInternAtom(dm.display, "WM_DELETE_WINDOW", false);
-	XSetErrorHandler(x11_handler);
+    #define WM_DEL_WIN "WM_DELETE_WINDOW"
+    #define WM_PROT    "WM_PROTOCOLS"
+    dm.connection            = xcb_connect(NULL, NULL);
+    dm.screen                = xcb_setup_roots_iterator(xcb_get_setup(dm.connection)).data;
+    dm.wm_delete_window_atom = xcb_intern_atom_reply(dm.connection,
+                                                     xcb_intern_atom(dm.connection, 0, strlen(WM_DEL_WIN), WM_DEL_WIN),
+                                                     NULL)->atom;
+    dm.wm_protocols_atom     = xcb_intern_atom_reply(dm.connection,
+                                                     xcb_intern_atom(dm.connection, 1, strlen(WM_PROT), WM_PROT),
+                                                     NULL)->atom;
 }
 RUI_INLINE void rui_screen_dims(int32_t* width_out, int32_t* height_out) {
-	Screen* s;
-    s = XDefaultScreenOfDisplay(dm.display);
-	*width_out = s->width;
-	*height_out = s->height;
+    *width_out  = dm.screen->width_in_pixels;
+    *height_out = dm.screen->height_in_pixels;
 }
 RUI_INLINE rui_window* rui_window_open(char* title, int32_t width, int32_t height) {
-    int32_t s, swidth, sheight;
-    Window w;
-    Display* d;
-	rui_window* window;
+    xcb_connection_t* c;
+    xcb_screen_t*     s;
+    xcb_window_t      w;
+    rui_window*       window;
+    uint32_t          mask;
+    uint32_t          values[2];
+
+    c = dm.connection;
+    s = dm.screen;
+    w = xcb_generate_id(c);
+
+    mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
+    values[0] = s->black_pixel;
+    values[1] = XCB_EVENT_MASK_EXPOSURE |
+        XCB_EVENT_MASK_KEY_PRESS | XCB_EVENT_MASK_KEY_RELEASE |
+        XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE;
+
+    xcb_create_window(c, XCB_COPY_FROM_PARENT, w, s->root, 0, 0,
+                      width, height, 8, XCB_WINDOW_CLASS_INPUT_OUTPUT, s->root_visual,
+                      mask, values);
+    xcb_change_property(c, XCB_PROP_MODE_REPLACE, w, XCB_ATOM_WM_NAME, XCB_ATOM_STRING,
+                        8, strlen(title), title);
+    xcb_change_property(c, XCB_PROP_MODE_REPLACE, w, dm.wm_protocols_atom, XCB_ATOM_ATOM,
+                        32, 1, &dm.wm_delete_window_atom);
 
     window = (rui_window*)malloc(sizeof(rui_window));
 
-	d = dm.display;
-	s = DefaultScreen(d);
+    window->instance = c;
+    window->handle   = (void*)(uintptr_t)w;
 
-    rui_screen_dims(&swidth, &sheight);
+    xcb_map_window(c, w);
+    xcb_flush(c);
 
-	w = XCreateSimpleWindow(
-                            d, RootWindow(d, s),
-                            width >> 1, height >> 1,
-                            swidth >> 1, sheight >> 1,
-                            1, BlackPixel(d, s), WhitePixel(d, s)
-                            );
-
-    XSetClassHint(d, w, &(XClassHint){title, RUI_CLASS_NAME});
-    XStoreName(d, w, title);
-    XSetIconName(d, w, title);
-
-    window->instance = d;
-	window->handle = (void*)(uintptr_t)w;
-
-    XSelectInput(d, w, ExposureMask | KeyPressMask | StructureNotifyMask);
-    XSetWMProtocols(dm.display, w, &dm.delete_message_atom, 1);
-	XMapWindow(d, w);
-    XFlush(d);
-
-	return window;
+    return window;
 }
 RUI_INLINE bool rui_process_events(rui_event* e) {
-    XEvent xe;
-    KeySym key_sym;
-    XConfigureEvent xce;
-    while (XPending(dm.display)) {
-        XNextEvent(dm.display, &xe);
-        switch(xe.type) {
-        case KeyPress: {
+    bool                        status;
+    xcb_generic_event_t*        xge;
+    xcb_key_press_event_t*      xkpe;
+    xcb_key_release_event_t*    xkre;
+    xcb_client_message_event_t* xcme;
+
+    status = false;
+
+    while((xge = xcb_poll_for_event(dm.connection))) {
+        switch (xge->response_type & ~0x80) {
+        case XCB_KEY_PRESS: {
+            xkpe    = (xcb_key_press_event_t*)xge;
             e->type = RUI_EVENT_TYPE_KEY_PRESSED;
-            key_sym = XLookupKeysym(&xe.xkey, 0);
-            if (key_sym < 128) {
-                e->key = (char)key_sym;
-                return true;
-            }
+            e->key  = xkpe->detail;
+            status = true;
+            break;
         }
-        case KeyRelease: {
+        case XCB_KEY_RELEASE: {
+            xkre    = (xcb_key_release_event_t*)xge;
             e->type = RUI_EVENT_TYPE_KEY_RELEASED;
-            key_sym = XLookupKeysym(&xe.xkey, 0);
-            if (key_sym < 128) {
-                e->key = (char)key_sym;
-                return true;
-            }
+            e->key  = xkre->detail;
+            status = true;
+            break;
         }
-        case ClientMessage: {
-            if (xe.xclient.data.l[0] == dm.delete_message_atom) {
+        case XCB_CLIENT_MESSAGE: {
+            xcme = (xcb_client_message_event_t*)xge;
+            if (xcme->data.data32[0] == dm.wm_delete_window_atom) {
                 e->type = RUI_EVENT_TYPE_WINDOW_CLOSED;
-                return true;
+                status = true;
+                break;
             }
         }
-        case ConfigureNotify: {
-            xce = xe.xconfigure;
-            if ((xce.width != dm.window_width) || (xce.height != dm.window_height)) {
-                e->type = RUI_EVENT_TYPE_WINDOW_RESIZED;
-                e->window_width = xce.width;
-                e->window_height = xce.height;
-                return true;
-            }
+        default: {
+            break;
         }
         }
+        free(xge);
     }
-    return false;
+
+    return status;
 }
 RUI_INLINE void rui_close_window(rui_window *window) {
-    XDestroyWindow(window->instance, (Window)window->handle);
-    XCloseDisplay(window->instance);
+    xcb_disconnect((xcb_connection_t*)window->instance);
     free(window);
     RUI_UNUSED(window);
 }

@@ -30,13 +30,13 @@ int32_t main(void) {
             }
             case RUI_EVENT_TYPE_KEY_PRESSED: {
                 switch (event.key) {
-                case '1': {
+                case RUIK_1: {
                     quit = true;
                     break;
                 }
                 }
 
-                printf("key pressed %c\n", event.key);
+                printf("key pressed %u\n", (uint8_t)event.key);
                 break;
             }
 			}
