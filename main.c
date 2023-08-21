@@ -8,18 +8,18 @@ static bool quit = false;
 int32_t main(void) {
     rui_init();
 
-	int window_width, window_height;
-	rui_screen_dims(&window_width, &window_height);
-	window_width  /= 2;
-	window_height /= 2;
+    int window_width, window_height;
+    rui_screen_dims(&window_width, &window_height);
+    window_width  /= 2;
+    window_height /= 2;
 
-	rui_window* window;
+    rui_window* window;
     window = rui_window_open("test", window_width, window_height);
 
     while (!quit) {
-		rui_event event;
-		while (rui_process_events(&event)) {
-			switch (event.type) {
+        rui_event event;
+        while (rui_process_events(&event)) {
+            switch (event.type) {
             case RUI_EVENT_TYPE_WINDOW_CLOSED: {
                 quit = true;
                 break;
@@ -30,20 +30,20 @@ int32_t main(void) {
             }
             case RUI_EVENT_TYPE_KEY_PRESSED: {
                 switch (event.key) {
-                case RUIK_1: {
+                case RUIK_ESC: {
                     quit = true;
                     break;
                 }
                 }
 
-                printf("key pressed %u\n", (uint8_t)event.key);
+                printf("key pressed: 0x%.2x = %s\n", event.key, rui_key_list[event.key]);
                 break;
             }
-			}
-		}
+            }
+        }
     }
 
     rui_close_window(window);
 
-    return rui_quit(0);
+    return 0;
 }
